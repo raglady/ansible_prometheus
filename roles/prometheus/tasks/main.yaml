@@ -1,0 +1,117 @@
+---
+- name: Downloading prometheus
+  get_url:
+    url: "https://github.com/prometheus/prometheus/releases/download/v2.31.1/prometheus-{{ PROMETHEUS_VERSION }}.linux-amd64.tar.gz"
+    dest: "/tmp/prometheus-{{ PROMETHEUS_VERSION }}.linux-amd64.tar.gz"
+    mode: 0644
+
+- name: Untar prometheus
+  ansible.builtin.unarchive:
+    src: "/tmp/prometheus-{{ PROMETHEUS_VERSION }}.linux-amd64.tar.gz"
+    dest: "/tmp"
+    remote_src: yes
+
+- name: Create group prometheus
+  ansible.builtin.group:
+    name: prometheus
+    state: present
+
+- name: Create user prometheus
+  ansible.builtin.user:
+    name: prometheus
+    shell: /bin/false
+    groups: prometheus
+    append: yes
+    create_home: no
+    state: present
+  
+- name: Creating prometheus configuration directory
+  file:
+    path: "/etc/prometheus"
+    state: directory
+    recurse: yes
+    owner: prometheus
+    group: prometheus
+    mode: 0755
+
+- name: Creating prometheus data directory
+  file:
+    path: "/var/lib/prometheus"
+    state: directory
+    recurse: yes
+    owner: prometheus
+    group: prometheus
+    mode: 0755
+
+- name: Coping prometheus binary
+  ansible.builtin.copy:
+    src: "/tmp/prometheus-{{ PROMETHEUS_VERSION }}.linux-amd64/prometheus"
+    dest: "/usr/local/bin/prometheus"
+    remote_src: yes
+    owner: prometheus
+    group: prometheus
+    mode: 0755
+    force: yes
+  notify: restart prometheus
+
+- name: Copying promtool binary
+  ansible.builtin.copy:
+    src: "/tmp/prometheus-{{ PROMETHEUS_VERSION }}.linux-amd64/promtool"
+    dest: "/usr/local/bin/promtool"
+    remote_src: yes
+    owner: prometheus
+    group: prometheus
+    mode: 0755
+    force: yes
+  notify: restart prometheus
+
+- name: Copying console configuration
+  ansible.builtin.copy:
+    src: "/tmp/prometheus-{{ PROMETHEUS_VERSION }}.linux-amd64/consoles"
+    dest: "/etc/prometheus/consoles"
+    remote_src: yes
+    owner: prometheus
+    group: prometheus
+    mode: 0755
+    force: yes
+  notify: restart prometheus
+
+- name: Copying console library configuration
+  ansible.builtin.copy:
+    src: "/tmp/prometheus-{{ PROMETHEUS_VERSION }}.linux-amd64/console_libraries"
+    dest: "/etc/prometheus/console_libraries"
+    remote_src: yes
+    owner: prometheus
+    group: prometheus
+    mode: 0755
+    force: yes
+  notify: restart prometheus
+
+- name: Copying prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml
+    dest: /etc/prometheus/prometheus.yml
+    owner: prometheus
+    group: prometheus
+    mode: 0755
+    force: yes
+  notify: restart prometheus
+
+- name: Copying service configuration
+  ansible.builtin.copy:
+    src: "files/prometheus.service"
+    dest: "/etc/systemd/system/prometheus.service"
+    owner: root
+    group: root
+    mode: 0755
+    force: yes
+  notify: restart prometheus
+
+- include_tasks: reverse_proxy.yaml
+
+- name: start and enable prometheus
+  ansible.builtin.systemd:
+    name: prometheus
+    daemon_reload: yes
+    state: started
+    enabled: yes

@@ -1,0 +1,17 @@
+---
+- name: clean up
+  become: no
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: ssl ca private key
+      local_action:
+        module: ansible.builtin.file
+        path: "/tmp/ca.key"
+        state: absent
+
+    - name: clean up ssl ca certificate
+      local_action:
+        module: ansible.builtin.file
+        path: "/tmp/ca.crt"
+        state: absent

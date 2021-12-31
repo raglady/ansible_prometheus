@@ -1,0 +1,57 @@
+---
+- name: Downloading node_exporter
+  get_url:
+    url: "https://github.com/prometheus/node_exporter/releases/download/v1.3.1/node_exporter-{{ NODE_EXPORTER_VERSION }}.linux-amd64.tar.gz"
+    dest: "/tmp/node_exporter-{{ NODE_EXPORTER_VERSION }}.linux-amd64.tar.gz"
+    mode: 0644
+
+- name: Untar node_exporter package
+  ansible.builtin.unarchive:
+    src: "/tmp/node_exporter-{{ NODE_EXPORTER_VERSION }}.linux-amd64.tar.gz"
+    dest: "/tmp"
+    remote_src: yes
+
+- name: Create group node_exporter
+  ansible.builtin.group:
+    name: node_exporter
+    state: present
+
+- name: Create user node_exporter
+  ansible.builtin.user:
+    name: node_exporter
+    shell: /bin/false
+    groups: node_exporter
+    append: yes
+    create_home: no 
+    state: present
+  
+- name: Copying node_exporter binary
+  ansible.builtin.copy:
+    src: "/tmp/node_exporter-{{ NODE_EXPORTER_VERSION }}.linux-amd64/node_exporter"
+    dest: "/usr/local/bin/node_exporter"
+    remote_src: yes
+    owner: node_exporter
+    group: node_exporter
+    mode: 0755
+    force: yes
+
+- name: Copying service configuration
+  ansible.builtin.copy:
+    src: "files/node_exporter.service"
+    dest: "/etc/systemd/system/node_exporter.service"
+    remote_src: no
+    owner: root
+    group: root
+    mode: 0755
+    force: yes
+  notify: 
+    - restart node_exporter
+
+- name: start and enable node_exporter
+  ansible.builtin.systemd:
+    name: node_exporter
+    daemon_reload: yes
+    state: started
+    enabled: yes
+    
+- import_tasks: reverse_proxy.yaml

@@ -1,0 +1,22 @@
+---
+all:
+  hosts:
+    prometheus:
+      ansible_host: a.b.c.d
+      ansible_user: raglady
+    node_exporter_1:
+      ansible_host: a.b.c.d
+      ansible_user: raglady
+    node_exporter_2:
+      ansible_host: a.b.c.d
+      ansible_user: raglady
+
+  children:
+    prometheus_server:
+      hosts:
+        prometheus:
+    node_exporter:
+      hosts:
+        prometheus:
+        node_exporter_1:
+        node_exporter_2:

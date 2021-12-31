@@ -1,0 +1,12 @@
+---
+- name: Presetup
+  import_playbook: create_ssl_ca.yaml
+
+- name: Install node_exporter
+  import_playbook: node_exporter.yaml
+
+- name: Install prometheus
+  import_playbook: prometheus.yaml
+
+- name: Postsetup
+  import_playbook: delete_ssl_ca.yaml

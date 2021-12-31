@@ -1,0 +1,182 @@
+---
+- name: Install nginx
+  block:      
+    - name: Install nginx for reverse proxy
+      block:
+        - name: Install yum utils
+          ansible.builtin.yum:
+            name: yum-utils
+            update_cache: yes
+            state: latest
+        
+        - name: Set up yum repository
+          ansible.builtin.copy:
+            dest: /etc/yum.repos.d/nginx.repo
+            content: |
+              [nginx-stable]
+              name=nginx stable repo
+              baseurl=http://nginx.org/packages/centos/$releasever/$basearch/
+              gpgcheck=1
+              enabled=1
+              gpgkey=https://nginx.org/keys/nginx_signing.key
+              module_hotfixes=true
+
+              [nginx-mainline]
+              name=nginx mainline repo
+              baseurl=http://nginx.org/packages/mainline/centos/$releasever/$basearch/
+              gpgcheck=1
+              enabled=0
+              gpgkey=https://nginx.org/keys/nginx_signing.key
+              module_hotfixes=true
+            owner: root
+            group: root
+            force: yes
+        
+        - name: Install nginx stable
+          yum:
+            name: nginx
+            update_cache: yes
+            state: latest  
+      when: ansible_os_family|lower == 'redhat'
+
+    - name: Install nginx for reverse proxy
+      block:
+        - name: Install prerequest
+          yum:
+            name: 
+              - curl
+              - gnupg2
+              - ca-certificates
+              - lsb-release
+              - debian-archive-keyring
+            update_cache: yes
+            state: latest
+        
+        - name: Import an official nginx signing key
+          command: "curl https://nginx.org/keys/nginx_signing.key | gpg --dearmor |tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null"
+          changed_when: ""
+        
+        - name: Set up the apt repository for stable nginx package
+          command: 'echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/mainline/debian `lsb_release -cs` nginx" | tee /etc/apt/sources.list.d/nginx.list'  
+
+        - name: Install nginx
+          apt:
+            name: nginx
+            update_cache: yes
+            state: latest
+      when: ansible_os_family|lower == 'debian'
+
+    - name: Copy nginx config file
+      ansible.builtin.template:
+        src: default.conf
+        dest: /etc/nginx/conf.d/default.conf
+        mode: 0644
+        owner: root
+        group: root
+        backup: yes
+        force: yes
+      notify: restart nginx
+
+    - name: Create certs directory
+      file:
+        path: /etc/nginx/certs
+        state: directory
+        owner: root
+        group: root
+
+    - name: Create keys directory
+      file:
+        path: /etc/nginx/keys
+        state: directory
+        owner: root
+        group: root
+
+    - name: "Copy ssl ca certificate to {{ inventory_hostname }}"
+      ansible.builtin.copy:
+        src: "/tmp/ca.crt"
+        dest: /etc/nginx/certs/ca.crt
+        mode: 0644
+        backup: no
+        owner: root
+        group: root
+        force: yes
+      notify: restart nginx
+
+    - name: Create SSL private key
+      become: no
+      community.crypto.openssl_privatekey:
+        path: "/tmp/node_exporter_{{ inventory_hostname }}.key"
+        force: yes
+      no_log: yes
+      delegate_to: 127.0.0.1
+
+    - name: "Copy SSL private key to {{ inventory_hostname }}"
+      ansible.builtin.copy:
+        src: "/tmp/node_exporter_{{ inventory_hostname }}.key"
+        dest: /etc/nginx/keys/node_exporter.key
+        mode: 0644
+        owner: root
+        group: root
+        backup: yes
+        force: yes
+      notify: restart nginx
+
+    - name: Create SSL csr for node_exporter
+      community.crypto.openssl_csr_pipe:
+        privatekey_path: /etc/nginx/keys/node_exporter.key
+        common_name: "{{ ansible_default_ipv4['address'] }}"
+        extended_key_usage:
+          - serverAuth
+        extended_key_usage_critical: yes
+        use_common_name_for_san: false
+        subject_alt_name: 
+          - "IP:{{ ansible_default_ipv4['address'] }}"
+      register: csr
+      tags: san
+
+    - name: Sign node_exporter SSL certificate
+      become: no
+      community.crypto.x509_certificate:
+        csr_content: "{{ csr.csr }}"
+        privatekey_path: "/tmp/node_exporter_{{ inventory_hostname }}.key"
+        ownca_path: "/tmp/ca.crt"
+        ownca_privatekey_path: /tmp/ca.key
+        ownca_privatekey_passphrase: "{{ secret_ca_passphrase }}"
+        path: "/tmp/node_exporter_{{ inventory_hostname }}.crt"
+        provider: ownca
+        state: present
+        force: yes
+      delegate_to: 127.0.0.1
+
+    - name: "Copy ssl certificate to {{ inventory_hostname }}"
+      ansible.builtin.copy:
+        src: "/tmp/node_exporter_{{ inventory_hostname }}.crt"
+        dest: /etc/nginx/certs/node_exporter.crt
+        owner: root
+        group: root
+        mode: 0644
+        force: yes
+      notify: restart nginx
+
+    - name: clean up ssl private key
+      become: no
+      ansible.builtin.file:
+        path: "/tmp/node_exporter_{{ inventory_hostname }}.key"
+        state: absent
+      delegate_to: 127.0.0.1
+    
+    - name: clean up ssl certificate
+      become: no
+      ansible.builtin.file:
+        path: "/tmp/node_exporter_{{ inventory_hostname }}.crt"
+        state: absent
+      delegate_to: 127.0.0.1
+      
+    - name: Start and enable nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: started
+        enabled: yes 
+
+  when: inventory_hostname in (groups['node_exporter']|difference(groups['prometheus_server']))
+  tags: install_nginx_node_exporter
